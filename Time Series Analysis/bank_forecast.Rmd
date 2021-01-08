@@ -1,0 +1,649 @@
+---
+title: "TD4 - Econometrics"
+author: "Pierre-Emmanuel Diot \\ Djawed Mancer \\ Clément Abderrahmane"
+date: "`r Sys.Date()`"
+output: 
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    toc: yes
+---
+
+```{r setup, include=FALSE,warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r packages, message=FALSE,warning=FALSE}
+library(data.table)
+library(stargazer)
+library(corrplot)
+library(ggplot2)
+library(RColorBrewer)
+library(lmtest)
+library(car)
+library(miscTools)
+library(frontier)
+library(data.table)
+library(skimr)
+library(readxl)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(lattice)
+library(plyr)
+library(dplyr)
+library(forecast)
+library(fpp2)
+library(knitr)
+library(kableExtra)
+library(ggpubr)
+library(leaps)
+library(MASS)
+library(GGally)
+library(ggcorrplot)
+library(orcutt)
+library(ggfortify) 
+library(lubridate)
+library(readxl)
+library(plotly)
+library(hrbrthemes)
+library(Metrics)
+library(gvlma)
+```
+
+```{r mise en forme des tableaux, echo=TRUE}
+kable_1 <- function(tab, transp = FALSE, digits = 2, titre=NULL, font_size = NULL, ...){
+      if(transp){
+        tab %>% t() %>% kable(caption=titre, digits = digits,...) %>%
+          kable_styling(full_width = F, position = "center",
+                        bootstrap_options = c("striped", "condensed"))  
+      } else {
+        tab %>% kable(caption=titre, digits = digits, ...) %>%
+          kable_styling(full_width = F, position = "center",
+                        bootstrap_options = c("striped", "condensed"))
+      }
+    }
+```
+
+
+# Data
+
+```{r mydata,comment=NA}
+mydata<-read.csv("CrowdCounterBDD.csv",sep=";",dec=",")
+head(mydata) %>% kable_1(titre="Overview of 'mydata'")
+```
+
+```{r Categorical variables}
+mydata$date <- as.Date(mydata$date, format="%d/%m/%Y")
+mydata$nb <- as.numeric(mydata$nb)
+mydata$t <- as.numeric(mydata$t)
+
+mydata$day <- as.factor(mydata$jour)
+
+mydata$month <- as.factor(mydata$mois)
+levels(mydata$month) <- c("Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                          "Juillet", "Août", "Septembre", "Octobre", 
+                          "Novembre", "Décembre")
+mydata$year <- as.factor(mydata$an)
+mydata$joursem <- factor(mydata$joursem, c("Lundi", "Mardi", "Mercredi",
+                                           "Jeudi", "Vendredi", "Samedi"))
+
+mydata$week <- cut(as.numeric(mydata$jour), c(1,7,14,21,28,31), 
+                  include.lowest = TRUE, right = TRUE)
+mydata$week <- as.factor(mydata$week)
+levels(mydata$week) <- c("Sem1", "Sem2", "Sem3", "Sem4", "Fin")
+
+```
+
+
+```{r}
+head(mydata) %>% kable_1(titre="Overview of modified 'mydata'")
+```
+
+
+# Descriptive statistics and data visualisation
+
+
+We have mostly qualitative variables so boxplots are the most appropriated plots to represent data. 
+
+```{r boxplots, fig.width=15, fig.height=6}
+ggplot(mydata, aes(x=year,y=nb, fill=year)) + geom_boxplot() +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=7, color="red", 
+               fill="red") +
+  geom_abline(slope=0, intercept=mean(mydata$nb), col='red', size=1) +
+  labs(title = "Number of customers repartition and means between 2010 and 2018",x="Years", y="Number of customers") +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 10))+
+  theme(legend.position = "none")
+
+ggplot(mydata, aes(x=month,y=nb, fill=month)) + geom_boxplot() +
+  stat_summary(fun.y=mean, geom="point", shape=20, size=7, color="red",
+               fill="red")+
+  geom_abline(slope=0, intercept=mean(mydata$nb), col='red', size=1) +
+  labs(title = "Number of customers repartition and means over one year", x="", y="Number of customers") +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 10))+
+  theme(legend.position = "none")
+
+ggplot(mydata, aes(x=joursem,y=nb, fill=joursem)) + geom_boxplot() +
+    stat_summary(fun.y=mean, geom="point", shape=20, size=7,
+                 color="red", fill="red") +
+    labs(title = "Number of customers repartition and means over one week", x="", y="Number of customers", color=NULL) +
+    theme(plot.title = element_text(size = 14, face = "bold")) +
+    theme(axis.title.x = element_text(size = 12)) +
+    theme(axis.title.y = element_text(size = 12)) +
+    theme(legend.title = element_text(size = 10))+
+    theme(legend.position = "none")
+
+ggplot(mydata, aes(x=day,y=nb, fill=day)) + geom_boxplot() +
+    geom_hline(aes(yintercept = quantile(nb)[2], col='Q25%'), size=1)+
+    geom_hline(aes(yintercept = quantile(nb)[3], col='Q50%'), size=1)+
+    geom_hline(aes(yintercept = quantile(nb)[4], col='Q75%'), size=1)+
+    labs(title = "Number of customers repartition and means over one month and quartiles of the Number of customers",x="",
+         y="Number of customers") +
+    theme(plot.title = element_text(size = 14, face = "bold")) +
+    theme(axis.title.x = element_text(size = 12)) +
+    theme(axis.title.y = element_text(size = 12)) +
+    theme(legend.title = element_text(size = 10))+
+    theme(legend.position = "none")
+```
+
+
+```{r fig.width=13, fig.height=8}
+ggplot(mydata, aes(x=week,y=nb, fill=week)) + geom_boxplot() +
+  labs(title = "Number of customers over a month depending on the month ",
+       x="", y="Number of customers", color=NULL) +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) + 
+  theme(legend.position = "none") +
+  facet_wrap(~month)
+```
+
+```{r Fonction sommaire + écart type}
+f <- function(x){
+  c(Min=min(x), quantile(x,probs=0.25), Median = median(x),
+    quantile(x, probs=0.75),Max=max(x),
+    Mean = mean(x), Sd=sd(x))
+  }
+```
+
+
+```{r}
+tab <- as.table(rbind(f(mydata[mydata$vacances==0,]$nb),
+                      f(mydata[mydata$vacances==1,]$nb), f(mydata$nb)))
+rownames(tab) <- c("Non-holiday period", "Holiday period", "Total")
+
+tab %>% kable_1(transp=FALSE, titre ="Descriptive analysis of the quantitative variable 'Number of customers'")
+```
+
+
+**Conclusion**
+
+- Categorical variables to distinguish the effects of years, months, weeks and days on the number of customers
+- Important effect of the month of September and Monday on the number of customers
+- Break after 2013
+- Lots of customers at the begining and at the end of the months, very few customers at the middle of months
+- Months with the more customers at the end of the month : February, August, September and November
+- Big first week for the month of September
+
+After having plotted data, we create dummy variable to highlight the different effects explained above.
+
+
+# Models and estimation
+
+```{r}
+#sélection des variables pour les régressions
+mydatareg <- mydata[,c(1:3,4,7:11)]
+```
+
+```{r}
+#AIC
+null <- lm(nb~1,data=mydatareg)
+full <- lm(nb~.,data=mydatareg)
+step(full, data=mydatareg, direction="backward")
+```
+
+
+## First regression : the AIC regression
+
+
+```{r model 1}
+myreg1 <- lm(nb~joursem+vacances+day+month+year,data=mydatareg)
+summary(myreg1)
+```
+
+$$R^2 \approx 81.5\%$$
+
+Some levels are not significant but we choose not to remove them in order to avoid any loss of information.
+
+## Second regression
+
+Interaction between the dummy variable **vacances** with the categorical variable **month** to distinguish the possible effect of holidays on months.
+
+```{r model 2}
+myreg2 <- lm(nb~joursem+day+vacances*month+year,data=mydatareg)
+summary(myreg2)
+```
+
+$$R^2 \approx 82.25\%$$
+
+- Better R$^2$ but several *NA* coefficients
+- Several non significant coefficients
+
+
+## Third regression
+
+Creation of dummy variables to add them to the model so as to get a more precise output.
+
+```{r Dummies1}
+mydatareg$Lu <- ifelse(mydatareg$joursem=='Lundi',1,0)
+mydatareg$Sept <- ifelse(mydatareg$month=='Septembre',1,0)
+mydatareg$BegMonth <- ifelse(mydatareg$jour<=3,1,0)
+mydatareg$EndMonth <- ifelse(mydatareg$jour>=28,1,0)
+mydatareg$BigEndMonth <-
+  ifelse(mydatareg$month=='Février'|mydatareg$month=='Août'|                               mydatareg$month=='Septembre'|mydatareg$month=='Novembre',1,0)
+```
+
+
+```{r model 3}
+myreg3 <- lm(nb~day+vacances+month+year+joursem+Lu:BegMonth+
+               BigEndMonth:EndMonth,data=mydatareg)
+summary(myreg3)
+```
+
+$$R^2 \approx 84\%$$
+
+All coefficients linked to the interaction of dummy variable are significant and these interactions lead to an increase in the R$^2$ value.
+
+## Fourth regression
+
+Another dummies interaction added to the model which is the negative impact of the middle of the month on weekdays.  
+
+```{r Dummies2}
+mydatareg$week <- ifelse(mydatareg$joursem!='Samedi',1,0)
+mydatareg$MidMonth <- ifelse (mydatareg$jour>12&mydatareg$jour<20,1,0)
+```
+
+```{r model 4}
+myreg4 <- lm(nb~day+vacances+month+year+joursem+Lu:BegMonth+
+               BigEndMonth:EndMonth+week:MidMonth, data=mydatareg)
+summary(myreg4)
+```
+
+$$R^2 \approx 84.39\%$$
+
+
+## Last but not least regression
+
+Creation of the dummy **Sem1** to highlight the positive impact of the beginning of September on the number of customers.
+
+```{r Dummy}
+mydatareg$Sem1 <- ifelse(mydatareg$jour<=8,1,0)
+head(mydatareg) %>% kable_1(titre="Overview of 'mydatareg'")
+```
+
+```{r model 5}
+myreg5 <- lm(nb~day+vacances+month+year+joursem+Lu:BegMonth+
+               BigEndMonth:EndMonth+week:MidMonth+Sem1:Sept, data=mydatareg)
+summary(myreg5)
+```
+
+$$R^2 \approx 84.79\%$$
+
+```{r}
+#Valeurs aberrantes et influentes
+outlierTest(myreg5)
+mydatareg <- mydatareg[-c(2505,2175,1821,2076,352,480,2354),]
+```
+
+```{r model 5 sans valeur aberrante}
+myreg5 <- lm(nb~day+vacances+month+year+joursem+Lu:BegMonth+
+               BigEndMonth:EndMonth+week:MidMonth+Sem1:Sept, data=mydatareg)
+summary(myreg5)
+mydatareg$fitted <- predict(myreg5)
+```
+
+$$R^2 \approx 85.42\%$$
+
+After removing outliers, model 5 explains about $85.5\%$ of the number of customers' total variation.
+
+```{r fig.width=8, fig.height=4.5}
+ggplot(data=mydatareg, aes(x=nb, y=fitted))+geom_point(col='orange', cex=0.1)+
+  geom_abline(slope=1, intercept=0)+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) +
+  labs(title="Observed VS Fitted (modèle 5)", x="Observed", y="Fitted")
+```
+
+```{r fig.width=8, fig.height=4}
+mydatareg$resi <- residuals(myreg5)
+
+ggplot(data=mydatareg, aes(x=resi))+ 
+  geom_histogram(aes(y=..density..), colour="grey", fill="aquamarine")+
+  geom_density(alpha=.2, fill="#37BB94")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 10)) +
+  labs(title = "Residuals' Distribution", x="Residuals", y="Density")
+```
+
+
+**Conclusion**
+
+- Model 5 seems to fit the data quite well 
+- Model 5' s residuals appear to have a normal distribution
+
+# Residuals Autocorrelation
+
+## Detecting residuals autocorrelation
+
+
+```{r fig.width=10}
+myts_residuals <- ts(myreg5$residuals)
+result_acf = acf(myts_residuals)
+result_pacf = pacf(myts_residuals)
+```
+
+ACF and PACF graphs depict residuals' autocorrelation. To correct it, we add lagged variables of the dependant variable in our model.
+
+
+## Resolving Residuals Autocorrelation
+
+
+Creation of the variable $nb-k,\ \forall k \in \{1;\ 2;\ 3;\ 5;\ 23;\ 24;\ 25;\ 26;\ 29;\ 30 \}$, which represents the variable $nb$ with a k-lag.
+
+
+```{r}
+mydatareg$nb_1 <- c(rep(0,1),mydatareg$nb[1:nrow(mydatareg)-1])
+mydatareg$nb_2 <- c(rep(0,2),mydatareg$nb[2:nrow(mydatareg)-2])
+mydatareg$nb_3 <- c(rep(0,3),mydatareg$nb[3:nrow(mydatareg)-3])
+mydatareg$nb_5 <- c(rep(0,5),mydatareg$nb[5:nrow(mydatareg)-5])
+mydatareg$nb_23 <- c(rep(0,23),mydatareg$nb[23:nrow(mydatareg)-23])
+mydatareg$nb_24 <- c(rep(0,24),mydatareg$nb[24:nrow(mydatareg)-24])
+mydatareg$nb_25 <- c(rep(0,25),mydatareg$nb[25:nrow(mydatareg)-25])
+mydatareg$nb_26 <- c(rep(0,26),mydatareg$nb[26:nrow(mydatareg)-26])
+mydatareg$nb_29 <- c(rep(0,29),mydatareg$nb[29:nrow(mydatareg)-29])
+mydatareg$nb_30 <- c(rep(0,30),mydatareg$nb[30:nrow(mydatareg)-30])
+myreg5 <- lm(nb~nb_1+nb_2+nb_3+nb_5+nb_23+nb_24+nb_25+nb_26+nb_29+nb_30+day+
+               vacances+month+year+joursem+Lu:BegMonth+BigEndMonth:EndMonth+
+               week:MidMonth+Sem1:Sept,data=mydatareg)
+summary(myreg5)
+mydatareg$fitted <- predict(myreg5)
+resi <- myreg5$residuals
+```
+
+$$R^2\approx 89.07\%$$
+
+```{r fig.width=10}
+myts_residuals <- ts(myreg5$residuals)
+result_acf = acf(myts_residuals)
+result_pacf = pacf(myts_residuals)
+```
+
+
+- Increase in the R$^2$ value after having corrected residuals' autocorrelation
+- Very few significant lags as shown in the ACF graph
+- About 4 to 5 significant lags as shown in the PACF graph in the range of a few per cent.
+
+```{r mymodel}
+#Valeurs aberrantes et influentes
+outlierTest(myreg5)
+mydatareg <- mydatareg[-c(2227,989,2,2329,1869,1822,2127,2428,1519,1),]
+
+mymodel <- lm(nb~nb_1+nb_2+nb_3+nb_5+nb_23+nb_24+nb_25+nb_26+nb_29+nb_30+day+
+                vacances+month+year+joursem+Lu:BegMonth+BigEndMonth:EndMonth+
+                week:MidMonth+Sem1:Sept,data=mydatareg)
+summary(mymodel)
+mydatareg$fitted <- round(predict(mymodel),0)
+```
+
+$$R^2 \approx 89.32\%$$
+
+```{r}
+gvlma(mymodel)
+```
+
+With the **gvlma** function we can notice there is no Heteroscedasticity in our model which means that the standard deviations of the estimated parameters are unbiased. 
+
+
+# Some plots and tables of mymodel
+
+```{r fig.width=8, fig.height=4.5}
+ggplot(data=mydatareg, aes(x=nb, y=fitted))+geom_point(col='orange', cex=0.1)+
+  geom_abline(slope=1, intercept=0)+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) +
+  labs(title="Observed VS Fitted (mymodel)", x="Observed", y="Fitted")
+```
+
+Our model seems to fit the data quite well while the number of customers is lower than about one thousand. Once one thousand customers reached, some points are situated farther from the bisector. 
+
+
+```{r fig.width=9, fig.height=4}
+myts_obs <- ts(mydatareg[,1], start=c(2010), end=c(2018,5), frequency=12)
+myts_fit <- ts(mydatareg[,18], start=c(2010), end=c(2018,5), frequency=12)
+forecastColor <- "#69b3a2"
+nbColor <- rgb(0.2, 0.6, 0.9, 1)
+
+autoplot(myts_obs, size=1, fill=nbColor) + 
+  labs(title = "Evolution of observed number of customers over 99 months",
+       x="Years", y="Observed number of customers", colour=NULL) +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10))
+
+autoplot(myts_fit, size=1, fill=forecastColor) + 
+  labs(title = "Evolution of fitted number of customers over 99 months",
+       x="Years", y="Fitted number of customers", colour=NULL) +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10))
+
+myts_ER <- 100*(myts_obs-myts_fit)/myts_obs
+
+autoplot(myts_ER, size=1, fill='green') + 
+  geom_hline(yintercept=0, col='red') +
+  labs(title = "Relative deviation between observed and fitted number of customers over 99 months",
+       x="Years", y="Relative deviation (%)", colour=NULL) +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10))
+```
+
+The fitted number of customers obtained with our model appears to look like the actual number of customers who went to the bank agency between 2010 and 2018. 
+
+However the relative deviation plot depicts significant deviations for some periods. 
+
+The most important one is at the end of 2016 with nearly 60% of relative deviation between actual and fitted values. In other words, our model explain barely 40% of the actual number of customers for that period. 
+
+Otherwise, the relative deviation between observed and fitted number of customers over 99 months is lower than 30% in absolute value. 
+
+```{r}
+head(mydatareg[,c(3,1,18)]) %>% kable_1(
+  titre="Overview of Observed Vs Fitted Number of customers")
+```
+
+
+# Forecasting
+
+## New database
+
+```{r modification newdata}
+newdata <-read_excel("CrowdCounterNEWdataBIS.xlsx")
+
+newdata$date <- as.Date(newdata$date, format="%Y/%m/%d")
+newdata$jour <- as.numeric(newdata$jour)
+newdata$mois <- as.numeric(newdata$mois)
+newdata$joursem <- as.factor(newdata$joursem)
+newdata$joursem <- factor(newdata$joursem, c("Lundi", "Mardi", "Mercredi", "Jeudi", 
+                            "Vendredi", "Samedi"))
+newdata$t <- as.numeric(ifelse(newdata$mois==6,100,101))
+newdata$nb <- as.numeric(newdata$nb)
+
+newdata$day <- as.factor(newdata$jour)
+
+newdata$month <- as.factor(newdata$mois)
+levels(newdata$month) <- c("Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                          "Juillet", "Août", "Septembre", "Octobre", 
+                          "Novembre", "Décembre")
+newdata$year <- as.factor(newdata$an)
+
+newdata$Lu <- ifelse(newdata$joursem=='Lundi',1,0)
+newdata$Sept <- ifelse(newdata$month=='Septembre',1,0)
+newdata$BegMonth <- ifelse(newdata$jour<=3,1,0)
+newdata$EndMonth <- ifelse(newdata$jour>=28,1,0)
+newdata$BigEndMonth <-ifelse(newdata$month=='Février'|newdata$month=='Août'|                                newdata$month=='Septembre'|newdata$month=='Novembre',1,0)
+
+newdata$week <- ifelse(newdata$joursem!='Samedi',1,0)
+newdata$MidMonth <- ifelse(newdata$jour>12&newdata$jour<20,1,0)
+
+newdata$Sem1 <- ifelse(newdata$jour<=8,1,0)
+
+newdata$nb_1 <- c(rep(0,1),newdata$nb[1:nrow(newdata)-1])
+newdata$nb_2 <- c(rep(0,2),newdata$nb[2:nrow(newdata)-2])
+newdata$nb_3 <- c(rep(0,3),newdata$nb[3:nrow(newdata)-3])
+newdata$nb_5 <- c(rep(0,5),newdata$nb[5:nrow(newdata)-5])
+newdata$nb_23 <- c(rep(0,23),newdata$nb[23:nrow(newdata)-23])
+newdata$nb_24 <- c(rep(0,24),newdata$nb[24:nrow(newdata)-24])
+newdata$nb_25 <- c(rep(0,25),newdata$nb[25:nrow(newdata)-25])
+newdata$nb_26 <- c(rep(0,26),newdata$nb[26:nrow(newdata)-26])
+newdata$nb_29 <- c(rep(0,29),newdata$nb[29:nrow(newdata)-29])
+newdata$nb_30 <- c(rep(0,30),newdata$nb[30:nrow(newdata)-30])
+```
+
+```{r}
+head(newdata) %>% kable_1(titre="Overview of 'newdata'")
+```
+
+
+## Plots and tables
+
+```{r}
+newdata$forecast <- predict(mymodel, newdata = newdata,interval = "prediction", 
+                            level = 0.95)
+
+newdata$ratio <- 100*(newdata$forecast-newdata$nb)/newdata$nb
+```
+
+
+```{r forecasting plots, fig.width=12, fig.height=6}
+ggplot() + 
+  geom_line(data=newdata, aes(x=date, y=forecast[,1], colour="Forecast"),size=1) +
+  geom_line(data=newdata, aes(x=date, y=nb, colour="Observed"), size=1) +
+  geom_line(data=newdata, aes(x=date, y=forecast[,2], colour="Lower bound (95%)"),
+            size=1, linetype = "dashed") +
+  geom_line(data=newdata, aes(x=date, y=forecast[,3], colour="Upper bound (95%)"),
+            size=1, linetype = "dashed") +
+  labs(title = "Observed Vs Forecast Number of customers and Confidence Interval between June and July 2018",
+       x="Date", y="Number of customers", colour=NULL) +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 12)) 
+
+ggplot(newdata, aes(x=date, y=ratio[,1])) + 
+  geom_line(size=1.5, color='green') +
+  geom_abline(slope=0, intercept=0, col='red') +
+  labs(title = "Relative deviation between observed and forecast number of customers between June and July 2018",
+       x="Date", y="Relative deviation (%)", colour=NULL) +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 12))
+```
+
+```{r}
+FinalData <-newdata[,c(1,2,30,31)]
+FinalData$Observed <- FinalData$nb
+FinalData$Forecast <- round(FinalData$forecast,0)
+FinalData$'Relative deviation (%)' <- round(FinalData$ratio,2)
+FinalData <- FinalData[,c(1,5:7)]
+FinalData$Forecast <- FinalData$Forecast[,1]
+head(FinalData) %>% kable_1(titre="Overview of final data")
+```
+
+
+```{r}
+FinalData_corr <- FinalData[-c(1,38),]
+FinalData_corr$`Relative deviation (%)` <-
+  round(100*(FinalData_corr$Forecast-FinalData_corr$Observed)/FinalData_corr$Observed,2)
+```
+
+
+```{r, fig.width=12, fig.height=6}
+ggplot(FinalData_corr) + 
+  geom_line(aes(x=date, y=Forecast, colour="Forecast"),size=1) +
+  geom_line(aes(x=date, y=Observed, colour="Observed"), size=1) +
+  labs(title = "Observed Vs Forecast Number of customers between June and July 2018 
+       (without observations 1 and 38)",
+       x="Date", y="Number of customers", colour=NULL) + 
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 12))
+
+ggplot(FinalData_corr) + 
+  geom_line(aes(x=date, y=`Relative deviation (%)`), size=1, color='green') +
+  geom_abline(slope=0, intercept=0, col='red') +
+  scale_y_continuous(limits = c(-60,60)) +
+  labs(title = "Relative deviation between observed and forecast number of customers 
+       between June and July 2018 (without observations 1 and 38)",
+       x="Date", y="Relative deviation (e %)", colour=NULL) +
+  theme(plot.title = element_text(size = 14, face = "bold")) +
+  theme(axis.title.x = element_text(size = 12)) +
+  theme(axis.title.y = element_text(size = 12)) +
+  theme(legend.title = element_text(size = 12))
+```
+
+After having removed two observations with an important relative deviation, it appears that our model gives a forecast which is quite close to the actual number of customers observed for the months of June and July 2018.
+
+
+## Error indicators
+
+
+```{r}
+rss <- sum((newdata$forecast-newdata$nb)^2)
+
+bilan <- as.matrix(t(round(c(mse(FinalData$Observed,FinalData$Forecast),
+                          rmse(FinalData$Observed,FinalData$Forecast),
+                          mae(FinalData$Observed,FinalData$Forecast),
+                          mape(FinalData$Observed,FinalData$Forecast),rss),2)))
+colnames(bilan) <- c("MSE", "RMSE", "MAE", "MAPE","RSS")
+bilan %>% kable_1(titre="Error Indicators about 'mymodel'")
+```
+
+
+Let's developp a little the previous error indicators :
+
+- MSE stands for Mean Squared Error. MSE both takes into account the variance and the bias of the estimator, which is here our forecast. As we have removes outliers from our regression, it has a positive impact on MSE because the error grows quadratically in MSE. The bigger residual, the bigger MSE.
+$$MSE = \frac{1}{41}\sum_{t=1}^{41}(Observed_i-Forecast_i)^2$$
+
+- RMSE is the squared root of MSE and is often used to convert the error metric back into similar units to the original output (here the number of customers), making interpretation easier. 
+Here we have RMSE < 99 customers. 
+
+- MAE stands for Mean Absolute Error. In other words, we take only the absolute value of each residual so that negative and positive residuals don't cancel out and then, we calculate the average of all these residuals. Here we have MAE $\approx$ 50 which means that the mean absolute error is around 50 customers.
+$$MAE = \frac{1}{41}\sum_{t=1}^{41}|Observed_i-Forecast_i|$$
+
+- MAPE is the Mean Absolute Error in $\%$. Here we have MAPE=10%, that is to say on average our forecast is ten per cent smaller than the actual number of customers.
+$$MAPE = \frac{1}{41}\sum_{t=1}^{41}|\frac{Observed_i-Forecast_i}{Observed_i}|=\frac{1}{41}\sum_{t=1}^{41}|\frac{e_i}{Observed_i}|$$
+
+- Finally RSS is the Residual Squared Sum. RSS measures the gap between the data (here the actual number of customers) and the estimation (here the forecast number of customers).
+$$RSS = \frac{1}{41}\sum_{t=1}^{41} e_i^2$$
+
+
+Finally we will use MAPE in our report because it is robust to outliers (it is also the case of MAE).
