@@ -1,0 +1,1371 @@
+---
+title: "Devoir Econométrie L3 S2 Hétéroscédasticité"
+author: "Clément Abdherramane, Djawed Mancer, Pierre-Emmanuel Diot"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+    number_section: yes
+    keep_tex: yes
+    dev: png
+    df_print: kable
+
+---
+
+
+```{r setup, include=FALSE,warning=FALSE, comment=NA, message=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+```{r,echo=FALSE, message=FALSE,warning=FALSE}
+library(data.table)
+library(stargazer)
+library(corrplot)
+library(ggplot2)
+library(RColorBrewer)
+library(lmtest)
+library(car)
+library(miscTools)
+library(frontier)
+library(data.table)
+library(skimr)
+library(readxl)
+library(ggplot2)
+library(lmtest)
+library(sandwich)
+library(broom)
+library(dplyr)
+library(ggridges)
+library(ggpubr)
+library(knitr)
+library(kableExtra)
+library(prettydoc)
+library(robustbase)
+```
+
+```{r mise en forme des tableaux}
+kable_1 <- function(tab, transp = FALSE, digits = 2, titre=NULL, font_size = NULL, ...){
+      if(transp){
+        tab %>% t() %>% kable(caption=titre, digits = digits,...) %>%
+          kable_styling(full_width = F, position = "center",
+                        bootstrap_options = c("striped", "condensed"))  
+      } else {
+        tab %>% kable(caption=titre, digits = digits, ...) %>%
+          kable_styling(full_width = F, position = "center",
+                        bootstrap_options = c("striped", "condensed"))
+      }
+    }
+```
+
+```{r}
+theme_set(theme_gray())
+```
+
+```{r,comment=NA}
+
+food <- read.csv(file='BudgetFood.csv',header=TRUE,sep=",",dec=".")
+```
+
+# Introduction
+
+## Data and descriptive statistics
+```{r,warning=FALSE, comment=NA, message=FALSE}
+N=nrow(food)
+head(food)
+summary(food)
+skim(food)
+```
+
+## Data visualisation
+
+```{r,warning=FALSE, comment=NA, message=FALSE, fig.height=4, fig.width=6}
+ggplot(data = food, aes(y = wfood, x = totexp)) + 
+  geom_point(col = 'orange',cex=0.05) +
+  scale_y_continuous(limits=c(0,1)) + geom_smooth() +
+  labs(title = "Part accordée à la dépense alimentaire selon la dépense totale") +
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8)) +
+  theme(legend.title = element_text(size = 10))
+```
+
+
+La part du budget consacré à l'alimentation est globalement décroissante en fonction de la dépense totale d'un ménage. Ici on considère que la dépense totale est une proxy du revenu du ménage.
+Par ailleurs cette première présentation sommaire des données nous indique un risque fort d'hétéroscédasticité étant donné que la variance de la variable wfood est d'autant plus forte que la variable totexp est faible. L'hypothèse de variance constante apparaît très contestable à ce stade de l'analyse...
+
+## First regression
+
+```{r}
+mylm1<-lm(wfood~totexp,data=food)
+#+age+size+town+sex,data=food
+summary(mylm1)
+```
+
+## Detecting Heteroskedasticity residual analysis
+```{r}
+food$resi <- mylm1$residuals
+ggplot(data = food, aes(y = resi, x =totexp)) + 
+  geom_point(col = 'orange',cex=0.05)+
+  geom_abline(slope = 0)
+```
+
+## The Breusch-Pagan Test
+```{r}
+var.func <- lm(resi^2 ~ totexp, data = food)
+summary(var.func)
+qchisq(.95, df = 1)
+bptest(mylm1)
+```
+
+## The White Test
+```{r}
+ressq=food$resi^2
+modres <- lm(ressq~totexp+I(totexp^2), data=food)
+summary(modres)
+gmodres <- glance(modres)
+gmodres
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+chisq <- nrow(food)*Rsq  #statistique du test de White
+tc <- qchisq(.95, df=S-1) #valeur critique
+pval <- 1-pchisq(chisq, S-1)
+```
+
+
+## Resolving Heteroskedasticity
+```{r}
+coeftest(mylm1, vcov = vcovHC(mylm1, "HC1"))
+varfunc.ols <- lm(log(resi^2) ~ log(totexp), data = food)
+food$varfunc <- exp(varfunc.ols$fitted.values)
+food.gls <- lm(wfood ~ totexp, weights = 1/sqrt(varfunc), data = food)
+summary(food.gls)
+```
+
+## Visualizing results
+```{r}
+g <- ggplot(data = food, aes(y = wfood, x = totexp)) +
+  geom_point(col = 'orange',cex=0.05)
+g + geom_abline(slope = mylm1$coefficients[2], 
+                intercept = mylm1$coefficients[1], col = 'red')+
+ geom_abline(slope = food.gls$coefficients[2], 
+             intercept = food.gls$coefficients[1], col = 'green')
+
+```
+
+
+
+# Question 1
+
+## Data visualisation
+
+```{r Recodage de variables}
+
+#création des variables catégorielles
+food$sizeF <- as.factor(food$size)
+food$townF <- as.factor(food$town)
+food$ageF <- as.factor(food$age)
+
+levels(food$sizeF) <- c(levels(food$sizeF), "1 ou 2", 
+                       "3 ou 4", "Entre 5 et 9", "Plus de 10")
+food$sizeF[food$size<3] <- "1 ou 2"
+food$sizeF[food$size>=3&food$size<5] <- "3 ou 4"
+food$sizeF[food$size>=5&food$size<10] <- "Entre 5 et 9"
+food$sizeF[food$size>=10] <-"Plus de 10"
+
+levels(food$ageF) <- c(levels(food$ageF), "< 25ans", 
+                       "< 50ans", "< 75ans", "> 75ans")
+food$ageF[food$age<25] <- "< 25ans"
+food$ageF[food$age>=25&food$age<50] <- "< 50ans"
+food$ageF[food$age>=50&food$age<75] <- "< 75ans"
+food$ageF[food$age>=75] <- "> 75ans"
+
+#variable 'age' mise au carré
+food$age2 <- food$age^2
+```
+
+```{r}
+new_DF <- food[rowSums(is.na(food)) > 0,] #un individu n'a pas précisé son sexe
+food <- food[-14015,] #on décide de l'enlever de la base de données
+```
+
+
+```{r Graphiques dummies, fig.width=13, fig.height=4.5}
+g1 <- ggplot(food, aes(x=sex,y=wfood, fill=sex)) + geom_boxplot() +
+  labs(title = "Part de la dépense alimentaire \ndans le revenu selon le sexe") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+g2 <- ggplot(food, aes(x=town,y=wfood, fill=townF)) + geom_boxplot() +
+  labs(title = "Part de la dépense alimentaire dans le revenu \nselon la taille de la ville") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+g3 <- ggplot(food, aes(x=sizeF,y=wfood, fill=sizeF)) + geom_boxplot() +
+  labs(title = "Part de la dépense alimentaire dans le revenu \nselon la taille du foyer") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+g4 <- ggplot(food, aes(x=ageF,y=wfood, fill=ageF)) + geom_boxplot() +
+  labs(title = "Part de la dépense alimentaire dans le revenu \nselon l'âge de la personne de référence")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+
+ggarrange(g2,g3)
+ggarrange(g1,g4)
+```
+
+
+```{r Graphique age, fig.height=3.5, fig.width=9}
+p1 <- ggplot(food, aes(x=age, y=wfood)) + geom_point(colour="orange", cex=0.5) +
+  geom_smooth() +
+  labs(title = "Evolution de la dépense alimentaire selon l'âge") +
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8))
+
+p2 <- ggplot(food, aes(x=age2, y=wfood)) + geom_point(colour="orange", cex=0.5) +
+  geom_smooth() +
+  labs(title = "Evolution de la dépense alimentaire \nselon l'âge élevé au carré")+
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8))
+
+ggarrange(p1,p2)
+```
+
+La variance de la variable à expliquer *wfood* en fonction des variables *age* et *age2* semble constante. Il semblerait que l'hytpothèse d'homoscédasticité des résidus soit vérifiée si l'on régresse *wfood* par rapport à *age* ou à *age2*.
+
+
+## Second regression
+
+
+```{r}
+#création des variables dummies
+
+food$under25 <- ifelse(food$age<25,1,0)
+food$under50 <- ifelse(food$age>=25&food$age<50,1,0)
+food$under75 <- ifelse(food$age>=50&food$age<75,1,0)
+
+
+food$size1 <- ifelse(food$size<4,1,0)
+food$size2 <- ifelse(food$size>3&food$size<=5,1,0)
+
+food$town1 <- ifelse(food$town<3,1,0)
+
+food$woman <- ifelse(food$sex=="woman",1,0)
+```
+
+
+Après avoir transformé les variables *age*, *size* et *town*, on décide d'estimer le modèle 'Niveau-Niveau' suivant :
+
+$$wfood_{i} = \beta_{0} + \beta_{1}totexp_{i} + \beta_{2}under25_{i} + \beta_{3}under50_{i} +\beta_{4}under75_{i}+ \beta_{5}size1_{i}+\\ \beta_{6}size2_{i}+\beta_{7}town1_{i}+\beta_{8}woman_{i}+\varepsilon_{i}, \ \forall i$$
+
+```{r Niveau-Niveau}
+mylm2 <- lm(wfood~totexp+under25+under50+under75+size1+size2+town1+woman,
+            data=food)
+summary(mylm2)
+food$resi2 <- mylm2$residuals
+```
+
+Il est important de noter que les coefficients estimés sont significatifs, ce qui veut dire que le modèle avec toutes les variables est meilleur que le modèle avec seulement la constante en variable explicative. 
+La valeur de la statistique de Fisher a diminué par rapport au modèle avec seulement *totexp* en variable explicative. On la compare à la valeur critique $$F^{*}=1449 > F^{8,\ 23\ 962}_{0.95} \approx 1.94 $$ On peut rejeter l'hypothèse de non significativité des coefficients de notre modèle. Ainsi, au risque de 5% notre modèle est significativement plus efficace que le modèle avec seulement la constante.
+
+$\widehat{\beta_{2}}, \ \widehat{\beta_{3}} \ et \ \widehat{\beta_{4}}$ permettent de différencier la part du budget accordée à l'alimentation selon respectivement l'âge. 
+$\widehat{\beta_{5}}\ ,\ \widehat{\beta_{6}}\ et\ \widehat{\beta_{7}}$ différencient la part du budget accordée à l'alimentation selon respectivement la taille du foyer et la taille de la ville.
+Enfin, $\widehat{\beta_{7}}$ permet d'étudier les différences de part du budget accordée à l'alimentation selon le genre.
+
+Par exemple un homme qui a entre 25 et 50 ans, vivant dans une grande ville ($size\ge 3$) et dans un foyer comprenant entre 1 et 3 personnes aura d'après notre régression une constante égale à : $$\widehat{\beta_{0}} + \widehat{\beta_{3}} + \widehat{\beta_{5}} = 6.106 \times 10^{-1} -7.709 \times 10^{-2} - 9.383 \times 10^{-2} \approx 0.44$$
+
+Mathématiquement, la valeur de la constante correspond à la valeur de *wfood* lorsque *totexp* est égal à 0. Economiquement, mieux vaut ne pas interpréter la constante car la part de la dépense totale accordée à l'alimentation a peu de sens lorsque la dépense totale est nulle. Il faudrait centrer les variables pour pouvoir analyser la constante.
+
+On remarque enfin que la valeur de $\widehat{\beta_{1}}$ a très faiblement augmenté en valeur absolue par rapport à la première régression qui ne comprenait que la variable *totexp* comme variable explicative.
+
+On constate aussi une augmentation du coefficient de détermination, ce qui signifie que la part de la variance expliquée dans la variance totale a augmenté.
+
+
+# Question 2 
+
+## Matrice de corrélations
+
+On décide de tracer la matrice des corrélations pour réprésenter les éventuels effets croisés entre les variables. On ne considère que les variables au format numérique.
+
+```{r}
+food$totexp <- as.numeric(food$totexp)
+mcorr<-round(cor(food[,c(2:3,14:20)]),2)
+mcorr[upper.tri(mcorr)]<-" "
+mcorr %>% kable_1(
+  titre = "Matrice de corrélation des variables explicatives et de la variable dépendante")
+```
+
+```{r fig.width=10}
+mcorr<-round(cor(food[,c(2:3,14:20)]),2)
+par(mfrow=c(1,1))
+corrplot(cor(mcorr), type = "lower", tl.srt=45)
+```
+
+Avant tout, il ne faut pas prendre en compte les corrélations entre dummies correspondant à la même variable.
+
+On remarque que les variables *totexp*, *town1* et *under50* sont les variables les plus corrélées avec la variable à expliquer *wfood*. 
+
+La corrélation la plus forte se fait entre la variable à expliquer *wfood* et la variable explicative *totexp*. Cette corrélation est négative car plus la dépense totale augmente, plus la part consacrée à l'alimentation diminue. Cela est en adéquation avec les résultats des deux régressions. 
+
+On décide d'ajouter des variables catgéorielles en interaction avec *totexp* dans notre régression.
+
+On décide d'estimer le modèle complet suivant :
+$$wfood_{i} = \beta_{0} + \beta_{1}totexp_{i} + \beta_{2}under25_{i} + \beta_{3}under50_{i} + \beta_{4}under75_{i} + \beta_{5}size1 + \\ \beta_{6}size2+ ... + \beta_{K}size_{i}\times woman_{i} + \varepsilon_{i}, \ \forall i$$
+```{r}
+mylmtot <- lm(wfood~(totexp+under25+under50+under75+size1+size2+town1+woman)^2,
+              data=food)
+coeftest(mylmtot)
+```
+
+Cette régression assez fastidieuse permet de déterminer les variables explicatives à garder si l'on souhaite prendre en compte les effets croisés entre ces variables.
+
+- Les coefficients associés aux variables *totexp* et aux dummies correspondant à l'âge sont significatifs (à l'exception de la dummy *under75*)
+- Les coefficients associés à la mise en interaction des variables *totexp* et *age*, *totexp* et *size* ainsi que *totexp* et *town1* sont tous significatifs
+- Les *NA* correspondent à la mise en intercation de dummies provenant de la même variable catégorielle. Il ne faut pas en tenir compte.
+
+
+## Third regression
+
+On décide d'estimer le modèle suivant qui permet de différencier l'influence de la dépense totale sur la part accordée à l'alimentation selon différentes caractéristiques sociologiques :
+$$wfood_{i} = \beta_{0} + \beta_{1}totexp_{i} + \beta_{2}totexp_{i}\times under25+\beta_{3}totexp_{i}\times under50+\\ \beta_{4}totexp_{i}\times size1 + \beta_{5}totexp_{i}\times size2 + \beta_{6}totexp_{i}\times town1+\varepsilon_{i}, \ \forall i$$
+
+```{r}
+mylm3 <- lm(wfood~totexp+totexp:under25+totexp:under50+totexp:under75+totexp:size1+
+              totexp:size2+totexp:town1, data=food)
+summary(mylm3)
+food$resi3 <- mylm3$residuals
+```
+
+Tous nos coefficients sont significatifs. Le modèle est significatif d'après la statistique de Fisher : $F^{*}=1501 > F^{7,\ 23\ 963}_{0.95} \approx 2$.
+Le coefficient de détermination est d'environ 30% : la variance expliquée correpond à 30% de la variance totale.
+
+Si l'on considère un individu ayant entre 25 et 50 ans et vivant dans un foyer de 3 personnes ou moins dans une grande ville, l'effet marginal de la dépense totale sur la part accordée à l'alimentation vaut : $\widehat{\beta_{1}}+\widehat{\beta_{3}}+\widehat{\beta_{4}} \approx -1.92\times 10^{-7}$.
+
+
+# Question 3
+
+## Other regressions
+
+### Fourth regression (Log-Niveau)
+
+Les deux régressions précédentes n'utilisant pas de forme fonctionnelle, on décide d'estimer un modèle Log-Niveau. On conserve les variables de notre dernière régression. Les variables *age*, *size* et *town* sont des variables catégorielles. On utilise encore une fois les dummies créées à partir de ces variables. On estime le modèle Log-Niveau suivant :
+$$ln(wfood_{i}) = \beta_{0} + \beta_{1}totexp_{i} + \beta_{2}totexp_{i}\times under25+\beta_{3}totexp_{i}\times under50+\\ \beta_{4}totexp_{i}\times under75+ \beta_{5}totexp_{i}\times size1 + \beta_{6}totexp_{i}\times size2 + \beta_{7}totexp_{i}\times town1+\varepsilon_{i}, \ \forall i$$
+```{r}
+food$lwfood <- log(food$wfood)
+food <- food %>% filter(!food$lwfood==-Inf) 
+```
+
+
+```{r fig.height=4, fig.width=6}
+ggplot(data = food, aes(y = lwfood, x = totexp)) + geom_point(col = 'orange',cex=0.05) +
+  scale_y_continuous(limits=c(-4,0)) + geom_smooth() +
+  labs(title = "Logarithme de la part accordée à la dépense alimentaire selon la dépense totale") +
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8)) +
+  theme(legend.title = element_text(size = 10))
+```
+
+En passant la variable *wfood* au log, la variance de *lwfood* en fonction de *totextp* semble avoir diminué. Le risque d'hétéroscédasticité semble moins important que pour la régression de *wfood* sur *totexp*. Il est possible que l'hypothèse d'homoscédasticité soit vérifiée pour cette régression. Cela sera vérifié lors des tests de la question 4.
+
+
+```{r Log-Niveau}
+mylm4 <- lm(lwfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+              totexp:size1+totexp:size2+totexp:town1, data=food)
+summary(mylm4)
+food$resi4 <- mylm4$residuals
+```
+
+Tous les coefficients sont significatifs à l'exception de $\beta_{4}$, ce qui est logique car on a supprimé les valeurs infinies de la variable *lwfood*.
+
+Ici, l'effet marginal de *totexp* sur *lwfood* selon les caractéristiques sociologiques représente la semi-élasticité de la part du budget accordée à l'alimentation par rapport à la dépense totale. Cela nous permet de savoir de combien varie *wfood* en % lorsque *totexp* augmente d'une unité.
+
+Si l'on considère un individu ayant entre 25 et 50 ans et vivant dans un foyer de 3 personnes ou moins dans une grande ville, une variation unitaire de *totexp* entraine une variation de *wfood* de : $100\times (e^{\widehat{\beta_{1}}+\widehat{\beta_{3}}+\widehat{\beta_{4}}}-1) \approx -6.91\times 10^{-5}\ \%$.
+
+### Fifth regression (Niveau-Log)
+
+On peut aussi estimer le modèle Niveau-Log suivant :
+$$wfood_{i} = \beta_{0} + \beta_{1}ln(totexp_{i}) + \beta_{2}ln(totexp_{i})\times under25+\beta_{3}ln(totexp_{i})\times under50 +\beta_{4}ln(totexp_{i})\times under75 \\ +\beta_{5}ln(totexp_{i})\times size1 + \beta_{6}ln(totexp_{i})\times size2 + \beta_{7}ln(totexp_{i})\times town1+\varepsilon_{i}, \ \forall i$$
+
+```{r}
+food$ltotexp <- log(food$totexp)
+```
+
+```{r fig.height=4, fig.width=6}
+ggplot(data = food, aes(y = wfood, x = ltotexp)) + geom_point(col = 'orange',cex=0.05) +
+  scale_y_continuous(limits=c(0,1)) + geom_smooth() +
+  labs(title = "Part accordée à la dépense alimentaire selon le logarithme de la dépense totale") +
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8)) +
+  theme(legend.title = element_text(size = 10))
+```
+
+
+Après avoir passer la variable *totexp* au log, il est possible que la variance de *wfood* selon *ltotexp* soit constante. Le risque d'hétéroscédasticité semble moins important que pour la régression de *wfood* sur *totexp*. 
+
+
+```{r Niveau-Log}
+mylm5 <- lm(wfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+              ltotexp:size1+ltotexp:size2+ltotexp:town1, data=food)
+summary(mylm5)
+food$resi5 <- mylm5$residuals
+```
+
+Tous les coefficients sont significatifs à l'exception de $\beta_{4}$, ce qui est logique car on a supprimé les valeurs infinies de la variable *lwfood*.
+
+Ici, l'effet marginal de *totexp* sur *wfood* selon les caractéristiques sociologiques représente la variation de niveau de la part du budget accordée à l'alimentation lorsque la dépense totale augmente de 1%.
+
+Si l'on considère un individu ayant entre 25 et 50 ans et vivant dans un foyer de 3 personnes ou moins dans une grande ville, une variation de *totexp* de 1% entraine une variation de *wfood* de : $(\widehat{\beta_{1}}+\widehat{\beta_{3}}+\widehat{\beta_{5}})\times ln(1.01)\approx -0.01$.
+Autrement dit si la dépense totale augmente de 100% (elle double), alors la part accordée à l'alimentation varie de : $(\widehat{\beta_{1}}+\widehat{\beta_{3}}+\widehat{\beta_{5}})\times ln(2)\approx -0.10$, donc diminue de 10%.
+
+
+### Sixth regression (Log-Log)
+
+Enfin, il semble intéressant d'estimer le modèle Log-Log suivant :
+$$ln(wfood_{i}) = \beta_{0} + \beta_{1}ln(totexp_{i}) + \beta_{2}ln(totexp_{i})\times under25+\beta_{3}ln(totexp_{i})\times under50 +\\ \beta_{4}ln(totexp_{i})\times under75 +\beta_{5}ln(totexp_{i})\times size1 + \beta_{6}ln(totexp_{i})\times size2 + \beta_{7}ln(totexp_{i})\times town1+\varepsilon_{i}, \ \forall i$$
+
+```{r fig.height=4, fig.width=6}
+ggplot(data = food, aes(y = lwfood, x = ltotexp)) + geom_point(col = 'orange',cex=0.05) +
+  scale_y_continuous(limits=c(-4,0)) + geom_smooth() +
+  labs(title = "Logarithme de la part accordée à la dépense alimentaire 
+       selon le logarithme de la dépense totale") +
+  theme(plot.title = element_text(size = 10, face = "bold")) +
+  theme(axis.title.x = element_text(size = 8)) +
+  theme(axis.title.y = element_text(size = 8)) +
+  theme(legend.title = element_text(size = 10))
+```
+
+En repésentant le log de *wfood* en fonction du log de *totexp*, on peut penser que l'hypothèse d'homoscédasticité est vérifiée car la variance de *lwfood* semble constante par rapport à *ltotexp*. 
+
+
+```{r Log-Log}
+mylm6 <- lm(lwfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+              ltotexp:size1+ltotexp:size2+ltotexp:town1, data=food)
+summary(mylm6)
+food$resi6 <- mylm6$residuals
+```
+
+Tous les coefficients sont significatifs à l'exception de $\beta_{3}$. Cela peut provenir du fait que l'on a supprimé les valeurs infinies de *lwfood*.
+
+Ici l'effet marginal de *totexp* sur *lwfood* représente l'élasticité de la part du budget accordée à l'alimentation par rapport à la dépense totale. Cela nous permet de connaître la variation de *wfood* en % lorsque *totexp* augmente d'1%.
+
+Si l'on considère un individu de moins de 25 ans, vivant dans une petite ville dans un foyer de 4 ou 5 personnes, on trouve que si  *totexp* augmente de 1% alors *wfood* varie de : $1.01^{\widehat{\beta_{1}}+ \widehat{\beta_{2}}+\widehat{\beta_{6}}+\widehat{\beta_{7}}}-1 \approx -0.004\%$.
+
+Autrement dit, si *totexp* double alors *wfood* varie de : $2^{\widehat{\beta_{1}}+ \widehat{\beta_{2}}+\widehat{\beta_{6}}+\widehat{\beta_{7}}}-1 \approx -0.26\%$. Cela signifie que pour un individu présentant ces caractéristiques sociologiques, une augmentation de la dépense totale de 100% entraine une diminution de la part de la consommation accordée à l'alimentation de 26%.
+
+**Conclusion**
+
+Nos 3 dernières régressions donnent des coefficients de détermination et des statistiques de Fisher plus élevés que le modèle Niveau-Niveau correspondant à la régression 3. En termes de significativité du modèle, l'utilisation d'une forme fonctionnelle paraît judicieuse.
+
+La régression Niveau-Log donne le coefficient de détermination le plus élevé et la statistique de Fisher la plus élevée. En effet, la part de la variance expliquée dans la variance totale est de 37,45% pour ce modèle. Toutefois, le coefficient $\beta_{4}$ est peu significatif du fait que la variable explicative *totexp* a été mise au log.
+
+Il faut maintenant déterminer si l'utilisation d'une forme fonctionnelle dans la régression permet de vérifier l'hytpothèse d'homoscédasticité.
+
+
+# Question 4
+
+## Detecting Heteroskedasticity
+### Residual analysis
+
+
+On choisit d'examiner la présence d'hétéroscédasticité pour la régression 2 avec toutes les variables et pour les 4 derniers modèles étudiés. Il s'agit des modèles faisant intervenir les variables *totexp* (variable quantitative), *age*, *size* et *town* (dummies) comme variables explicatives de *wfood*. 
+
+```{r fig.width=9, fig.height=9}
+par(mfrow=c(3,2))
+residualPlot(mylm2, main="Modèle avec toutes les variables", col="orange")
+residualPlot(mylm3, main="Modèle Niveau-Niveau avec variables en interaction",
+             col="orange")
+residualPlot(mylm4, main="Modèle Log-Niveau avec variables en interaction",
+             col="orange")
+residualPlot(mylm5, main="Modèle Niveau-Log avec variables en interaction",
+             col="orange")
+residualPlot(mylm6, main="Modèle Log-Log avec variables en interaction",
+             col="orange")
+```
+
+A première vue, ces représentations des résidus de Pearson ($e^{P}_{i}=\frac{e_{i}}{\sigma_{e_{i}}}$) selon les valeurs ajustées des différents modèles semblent indiquer que l'on est en présence d'erreurs hétéroscédastiques. Notons tout de même que l'hétérogénéité de la variance des résidus semble moins prononcée pour le modèle Log-Log.
+
+
+Pour nos 5 modèles, on choisit de représenter l'évolution des résidus selon la variable *totexp* car il s'agit de la seule variable quantitative du modèle. Les autres variables étant catégorielles, représenter les résidus en fonctions de ces variables aurait très peu d'intérêt.
+
+
+```{r fig.width=12, fig.height=7}
+r1 <- ggplot(data = food, aes(y = resi2, x =totexp)) + 
+  geom_point(col = 'orange',cex=0.05)+
+  geom_abline(slope = 0) +
+  labs(title = "Modèle avec toutes les variables") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+r2 <- ggplot(data = food, aes(y = resi3, x =totexp)) + geom_point(col = 'orange',cex=0.05)+
+  geom_abline(slope = 0) +
+  labs(title = "Modèle Niveau-Niveau") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+r3 <- ggplot(data = food, aes(y = resi4, x =totexp)) + geom_point(col = 'orange',cex=0.05)+
+  geom_abline(slope = 0) +
+  labs(title = "Modèle Log-Niveau") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+r4 <- ggplot(data = food, aes(y = resi5, x =ltotexp)) + 
+  geom_point(col = 'orange',cex=0.05)+
+  geom_abline(slope = 0) +
+  labs(title = "Modèle Niveau-Log") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+r5 <- ggplot(data = food, aes(y = resi6, x =ltotexp)) +
+  geom_point(col = 'orange',cex=0.05) +
+  geom_abline(slope = 0) +
+  labs(title = "Modèle Log-Log") +
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10)) +
+  theme(legend.title = element_text(size = 10)) 
+
+ggarrange(r1, r2, r3, r4, r5)
+```
+
+L'introduction d'une forme fonctionnelle logarithmique dans le modèle a une influence sur la variance des résidus. En effet, on remarque que dans les modèles faisant intervenir le log, les résidus sont répartis de manière plus homogène autour de leur espérance. 
+
+Afin de détecter toute forme d'hétéroscédasticité des résidus dans ces 5 modèles, on va effectuer successivement le test de Breusch-Pagan puis le test de White.
+
+Les hypothèses des tests sont les suivantes :
+$$\left \{
+\begin{array}{rcl}
+H_0:V(\epsilon_i)=\sigma^2 \\
+H_1 :V(\epsilon_i)=\sigma_i^2
+\end{array}
+\right.$$
+
+### Breusch-Pagan Test
+
+Sous l'hypothèse d'homoscédascticité, on a la régression auxiliaire contrainte :
+$$H_0:\ \epsilon^2_j= \delta _0+v$$
+
+**Pour la régression 2**
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte :
+$$H_1:\ \epsilon^2_2= \delta _0 + \delta_1totexp_{i}+\delta_{2}under25_{i} + \delta_{3}under50_{i} +\delta_{4}under75_{i}\\ +\delta_{5}size1_{i}+\delta_{6}size2_{i}+\delta_{7}town1_{i}+\delta_{8}woman_{i}+ w$$
+**Pour les régressions 3 à 6**
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte lorsque *totexp* est en niveau :
+$$H_1:\ \epsilon^2_m= \delta _0 + \delta_1totexp+\delta_{2}totexp\times under25+\delta_{3}totexp\times under50+\delta_{4}totexp\times under75 \\ \delta_{5}totexp\times size1 + \delta_{6}totexp\times size2 + \delta_{7}totexp\times town1 + w$$
+avec $m$ l'indice de la régression, $m \in \{3;4\}$ 
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte lorsque *totexp* est en log :
+$$H_1:\ \epsilon^2_n= \delta _0 + \delta_1ln(totexp)+\delta_{2}ln(totexp)\times under25+\delta_{3}ln(totexp)\times under50+\delta_{4}ln(totexp)\times under75 \\ \delta_{5}ln(totexp)\times size1 + \delta_{6}ln(totexp)\times size2 + \delta_{7}ln(totexp)\times town1 + w$$
+avec $n$ l'indice de la régression, $n \in \{5;6\}$ 
+
+Pour tester ces hypothèses, on s'appuie sur 2 tests. Le premier est un test de Fisher pour vérifier la significativité de la régression. La statistique du test est :
+$$F^{*}=\frac{R^{2}_{1}}{1-R^{2}_{1}}\times \frac{N-K-1}{q} \leadsto F^{q,\ N-K-1}_{\alpha}$$
+avec $N$ le nombre d'observations, $K$ le nombre de variables explicatives dans le modèles et $q$ le nombre de contraintes (ici le nombre de variables explicatives).
+
+Le second test réalisé est un test du $\chi^{2}$ à $K$ degrés de liberté sur la régression de $\epsilon^{2}$ sur les variables explicatives du modèle. Il s'agit de déterminer si certaines variables explicatives contribuent fortement à la valeur des résidus.
+
+Ces deux tests forment le test de Breusch-Pagan.
+
+```{r}
+food <- read.csv(file='BudgetFood.csv',header=TRUE,sep=",",dec=".")
+food <- food[-14015,]
+
+food$under25 <- ifelse(food$age<25,1,0)
+food$under50 <- ifelse(food$age>=25&food$age<50,1,0)
+food$under75 <- ifelse(food$age>=50&food$age<75,1,0)
+
+food$size1 <- ifelse(food$size<4,1,0)
+food$size2 <- ifelse(food$size>3&food$size<=5,1,0)
+
+food$town1 <- ifelse(food$town<3,1,0)
+
+food$woman <- ifelse(food$sex=="woman",1,0)
+```
+
+
+```{r}
+food$resi2 <- mylm2$residuals
+var.func <- lm(resi2^2~totexp+under25+under50+under75+size1+size2+town1+woman,
+               data = food)
+var.func.bis <- glance(var.func)
+summary(var.func)
+
+f <- ((nrow(food)-8-1)*var.func.bis$r.squared)/((1-var.func.bis$r.squared)*8)
+qf <- qf(0.95, 8, nrow(food)-8-1)
+
+chisq <- bptest(mylm2)$statistic
+qc <- qchisq(.95, df = 12)
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique") ; rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 2")
+```
+
+La majorité des coefficients de la régression auxiliaire de $e^{2}_{2}$ sur les variables explicatives de la régression 2 sont significatifs (à l'exception de $\delta_{6}$). Cela signifie que les variables explicatives du modèle 2 ont une influence sur les résidus de la régression. On est en présence d'hétéroscédasticité. Cette hétéroscédasticité est confirmée par la valeur très élevée de la statistique du test de Breush-Pagan et qui est nettement supérieure à la valeur critique $\chi^{2,\ 8}_{0.95} \approx 21.03$.
+
+```{r}
+food$resi3 <- mylm3$residuals
+var.func <- lm(resi3^2~totexp+totexp:under25+totexp:under50+totexp:under75+
+                 totexp:size1+totexp:size2+totexp:town1,data = food)
+var.func.bis <- glance(var.func)
+summary(var.func)
+
+f <- ((nrow(food)-7-1)*var.func.bis$r.squared)/((1-var.func.bis$r.squared)*7)
+qf <- qf(0.95, 7, nrow(food)-7-1)
+
+chisq <- bptest(mylm3)$statistic
+qc <- qchisq(.95, df = 7)
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique") ; rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 3")
+```
+
+Pour la régression de $\epsilon^{2}_{3}$ sur les variables explicatives de la régression 3, tous les coefficients sont significatifs à l'exception de $\delta_6$. On est aussi en présence d'erreurs hétéroscédastiques comme le confirme le test de significativité globale. On trouve $F^{*}_{3} \approx 149.5$ alors que la valeur critique vaut $F^{7,\ 23\ 963}_{0.95} \approx 2$.
+
+```{r}
+food$ltotexp <- log(food$totexp)
+food$lwfood <- log(food$wfood)
+food <- food %>% filter(!food$lwfood==-Inf) 
+```
+
+
+Dans les régressions qui vont suivre, la forme fonctionnelle logarithmique a été utilisée. La mise au logarithme de *wfood* a entrainé la suppresion de certaines données. *Food* comporte désormais 23 911 observations. Dans les régressions précédentes, il y avait 23 971 observations.
+
+```{r}
+food$resi4 <- mylm4$residuals
+var.func <- lm(resi4^2~totexp+totexp:under25+totexp:under50+totexp:under75+
+                 totexp:size1+totexp:size2+totexp:town1,data = food)
+var.func.bis <- glance(var.func)
+summary(var.func)
+
+f <- ((nrow(food)-7-1)*var.func.bis$r.squared)/((1-var.func.bis$r.squared)*7)
+qf <- qf(0.95, 7, nrow(food)-7-1)
+
+chisq <- bptest(mylm4)$statistic
+qc <- qchisq(.95, df = 7)
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique") ; rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 4")
+```
+
+Pour cette troisième régression auxiliaire, $\epsilon^{2}_{4}$ correspondent aux résidus d'un modèle Log-Niveau. On voit tout de suite que seulement 3 coefficients de la régression auxiliaire sont significatifs. La statistique de Fisher reste tout de même plus élevée que la valeur critique du test mais $F^{*}_{4}<F^{*}_{3}$. On peut en déduire que la mise au logarithme de la variable à expliquer entraine une diminution de la corrélation entre les résidus élevés au carré, ie $V(\epsilon)$, et les variables explicatives du modèle. On peut aller plus loin en supposant que la forme logarithmique tend à faire réduire l'hétéroscédasticité importante de la régression 3. Cette hypothèse est aussi illustrée par la diminution de la statistique du test de Breusch-Pagan version $\chi^2$
+
+```{r}
+food$resi5 <- mylm5$residuals
+var.func <- lm(resi5^2~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                 ltotexp:size1+ltotexp:size2+ltotexp:town1, data = food)
+var.func.bis <- glance(var.func)
+summary(var.func)
+
+f <- ((nrow(food)-7-1)*var.func.bis$r.squared)/((1-var.func.bis$r.squared)*7)
+qf <- qf(0.95, 7, nrow(food)-7-1)
+
+chisq <- bptest(mylm5)$statistic
+qc <- qchisq(.95, df = 7)
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique") ; rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 5")
+```
+
+L'ensemble des coefficients de la régression auxiliaire sont significatifs à l'exception de $\delta_5$. De plus la valeur élevée de la statistique de Breusch-Pagan met en avant la présence d'erreurs hétéroscédastiques dans le modèle Niveau-Log. 
+
+
+```{r}
+food$resi6 <- mylm6$residuals
+var.func <- lm(resi6^2~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                 ltotexp:size1+ltotexp:size2+ltotexp:town1,data = food)
+var.func.bis <- glance(var.func)
+summary(var.func)
+
+f <- ((nrow(food)-7-1)*var.func.bis$r.squared)/((1-var.func.bis$r.squared)*7)
+qf <- qf(0.95, 7, nrow(food)-7-1)
+
+chisq <- bptest(mylm6)$statistic
+qc <- qchisq(.95, df = 7)
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique") ; rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 6")
+```
+
+Dans cette régression auxiliaire des résidus au carré $\epsilon^2_6$ du modèle Log-Log, seuls 2 coefficients sont très significatifs. La statistique de Fisher et celle du test du $\chi^2$ sont nettement moins élevées que pour les autres régressions auxiliaires. Elles restent tout de même supérieures aux valeurs critiques, ce qui nous amène à rejeter l'hypothèse d'homoscédasticité des résidus au risque $\alpha=5\%$.
+Toutefois, on peut supposer que la mise au logarithme de la variable à expliquer *wfood* et de la seule variable explicative quantitative *totexp* conduit à une diminution de l'hétéroscédasticité des résidus. 
+
+
+### White Test
+
+
+```{r}
+food <- read.csv(file='BudgetFood.csv',header=TRUE,sep=",",dec=".")
+food <- food[-14015,]
+
+food$under25 <- ifelse(food$age<25,1,0)
+food$under50 <- ifelse(food$age>=25&food$age<50,1,0)
+food$under75 <- ifelse(food$age>=50&food$age<75,1,0)
+
+food$size1 <- ifelse(food$size<4,1,0)
+food$size2 <- ifelse(food$size>3&food$size<=5,1,0)
+
+food$town1 <- ifelse(food$town<3,1,0)
+
+food$woman <- ifelse(food$sex=="woman",1,0)
+```
+
+Le Test de White consiste à régresser les résidus élevés au carré par rapport au variables explicatives et en y ajoutant les variables explicatives au carré et les variables explicatives en interaction. On mettra seulement la variable *totexp* ou *ltotexp* au carré car les autres variables sont des dummies.
+
+Sous l'hypothèse d'homoscédascticité, on a la régression auxiliaire contrainte :
+$$H_0:\ \epsilon^2_j= \delta _0+v$$
+avec $j$ l'indice de la régression, $j \in \{2;6\}$.
+
+**Pour la régression 2**
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte :
+$$H_1:\ \epsilon^2_2= \delta _0 + \delta_1totexp+\delta_{2}under25_{i} +...+\delta_{8}woman+\delta_9totexp^2\\ +\delta_{10}totexp\times under25+...+\delta_{33}town1\times woman +w$$
+
+**Pour les régressions 3 à 6**
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte lorsque *totexp* est en niveau :
+$$H_1:\ \epsilon^2_m= \delta _0 + \delta_1totexp+\delta_{2}totexp\times under25+...+\delta_{7}totexp\times town1+\\ \delta_8totexp^2+\delta_9(totexp\times under25)^2+...+\delta_{19}totexp\times size2\times town1+w$$
+avec $m \in \{3;4\}$
+
+Sous l'hypothèse d'hétéroscédasticité, on a la régression auxiliaire non-contrainte lorsque *totexp* est en log :
+$$H_1:\ \epsilon^2_n= \delta _0 + \delta_1ln(totexp)+\delta_{2}ln(totexp)\times under25+...+\delta_{7}ln(totexp)\times town1+\\ \delta_8(ln(totexp))^2+\delta_9(ln(totexp)\times under25)^2+...+\delta_{19}ln(totexp)\times size2\times town1+w$$
+avec $n \in \{5;6\}$
+
+```{r}
+food$resi2 <- mylm2$residuals
+modres <- lm(resi2^2~(totexp+under25+under50+under75+size1+size2+town1+woman)^2+
+               I(totexp^2), data=food)
+coeftest(modres)
+gmodres <- glance(modres)
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+f <- ((nrow(food)-S-1)*gmodres$r.squared)/((1-gmodres$r.squared)*(S-1)) #statistique du test de Fisher
+chisq <- nrow(food)*Rsq  #statistique du test de White
+qc <- qchisq(.95, df=S-1) #valeur critique khi2
+qf <- qf(0.95, S-1, nrow(food)-S-1) #valeur critique Fisher
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique")
+rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre="Résultats du test de White associé à la régression 2")
+```
+
+```{r}
+food$resi3 <- mylm3$residuals
+modres <- lm(resi3^2~(totexp+totexp:under25+totexp:under50+totexp:under75+
+                        totexp:size1+totexp:size2+totexp:town1)^2+I(totexp^2),
+             data=food)
+coeftest(modres)
+gmodres <- glance(modres)
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+f <- ((nrow(food)-S-1)*gmodres$r.squared)/((1-gmodres$r.squared)*(S-1)) #statistique du test de Fisher
+chisq <- nrow(food)*Rsq  #statistique du test de White
+qc <- qchisq(.95, df=S-1) #valeur critique khi2
+qf <- qf(0.95, S-1, nrow(food)-S-1) #valeur critique Fisher
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique")
+rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre="Résultats du test de White associé à la régression 3")
+```
+
+```{r}
+food$ltotexp <- log(food$totexp)
+food$lwfood <- log(food$wfood)
+food <- food %>% filter(!food$lwfood==-Inf) 
+```
+
+
+```{r}
+food$resi4 <- mylm4$residuals
+modres <- lm(resi4^2~(totexp+totexp:under25+totexp:under50+totexp:under75+
+                        totexp:size1+totexp:size2+totexp:town1)^2+I(totexp^2),
+             data=food)
+coeftest(modres)
+gmodres <- glance(modres)
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+f <- ((nrow(food)-S-1)*gmodres$r.squared)/((1-gmodres$r.squared)*(S-1)) #statistique du test de Fisher
+chisq <- nrow(food)*Rsq  #statistique du test de White
+qc <- qchisq(.95, df=S-1) #valeur critique khi2
+qf <- qf(0.95, S-1, nrow(food)-S-1) #valeur critique Fisher
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique")
+rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre="Résultats du test de White associé à la régression 4")
+```
+
+```{r}
+food$resi5 <- mylm5$residuals
+modres <- lm(resi5^2~(ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                        ltotexp:size1+ltotexp:size2+ltotexp:town1)^2+I(ltotexp^2),
+             data=food)
+coeftest(modres)
+gmodres <- glance(modres)
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+f <- ((nrow(food)-S-1)*gmodres$r.squared)/((1-gmodres$r.squared)*(S-1)) #statistique du test de Fisher
+chisq <- nrow(food)*Rsq  #statistique du test de White
+qc <- qchisq(.95, df=S-1) #valeur critique khi2
+qf <- qf(0.95, S-1, nrow(food)-S-1) #valeur critique Fisher
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique")
+rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre="Résultats du test de White associé à la régression 5")
+```
+
+
+```{r}
+food$resi6 <- mylm6$residuals
+modres <- lm(resi6^2~(ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                        ltotexp:size1+ltotexp:size2+ltotexp:town1)^2+I(ltotexp^2),
+             data=food)
+coeftest(modres)
+gmodres <- glance(modres)
+Rsq <- gmodres$r.squared
+S <- gmodres$df #Number of Betas in model
+f <- ((nrow(food)-S-1)*gmodres$r.squared)/((1-gmodres$r.squared)*(S-1)) #statistique du test de Fisher
+chisq <- nrow(food)*Rsq  #statistique du test de White
+qc <- qchisq(.95, df=S-1) #valeur critique khi2
+qf <- qf(0.95, S-1, nrow(food)-S-1) #valeur critique Fisher
+
+tab <- as.table(matrix(c(f, chisq, qf, qc), nrow=2, ncol=2))
+colnames(tab) <- c("Statistique", "Valeur critique")
+rownames(tab) <- c("Fisher", "Khi2")
+tab %>% kable_1(titre="Résultats du test de White associé à la régression 6")
+```
+
+Les tests de White pour les 6 régressions donnent le même résultat : le rejet de l'hypothèse d'homoscédasticité. On rappelle que les variables dummies ne peuvent être responsables d'une quelconque hétéroscédasticité.
+On peut ajouter que les résidus sont fortement corrélés avec les variables explicatives du modèle, les interactions entre ces dernières ainsi que la variable *totexp* élevée au carré.
+
+Dans nos régressions auxiliaires Niveau-Log et Log-Log, la variable la plus corrélée aux résidus est *totexp* au carré. D'après le niveau de significativité, on peut même dire qu'il s'agit de la seule variable dans ce cas.
+Quant à la régression auxiliaire associée au  modèle Log-Niveau, là encore, on a *totexp* au carré très fortement corrélée aux résidus. Mais on a aussi l'interaction entre la dépense totale des ménages constitués d'au maximum 3 personnes qui génère de l'hétéroscédasticité.
+
+En se focalisant sur la régression auxiliaire du modèle Niveau-Niveau avec variables en interaction, on remarque à nouveau une forte corrélation aux résidus des 2 variables citées précédemment. Toutefois, on en trouve plein d'autres. Ici, les intéractions entre la dépense totale du ménage et le fait d'être habitant d'une petite ville, de faire partie d'un ménage de moins de 4 personnes en ayant moins de 25 ans, d'habiter dans une petite ville et d'avoir moins de 25 ans, d'habiter dans une petite ville peu importe la taille du foyer sont corrélées avec les résidus.
+
+Enfin, les modèles Log-Niveau et Log-Log présentent les statistiques de test les plus faibles. On peut dire que la mise au logarithme de la variable à expliquer entraine une diminution des corrélations entre la variance des résidus et les variables explicatives des différents modèles. Cela confirme l'hytpothèse que l'introduction d'une forme logarithmique dans le modèle - notamment pour la variable dépendante *wfood* - tend à réduire l'hétéroscédasticité des résidus.
+
+## Resolving Heteroskedasticity
+
+
+Pour chaque modèle, les résultats du premier test de Wald correspondent à la régression utilisant la méthode des MCO et et les résultats du second test de Wald correspondent à la régression utilisant la méthode des MCP. Nous utiliserons ces tests afin d'étudier l'évolution des écarts-types estimés après correction du modèle.
+
+```{r}
+food <- read.csv(file='BudgetFood.csv',header=TRUE,sep=",",dec=".")
+food <- food[-14015,]
+
+food$under25 <- ifelse(food$age<25,1,0)
+food$under50 <- ifelse(food$age>=25&food$age<50,1,0)
+food$under75 <- ifelse(food$age>=50&food$age<75,1,0)
+
+food$size1 <- ifelse(food$size<4,1,0)
+food$size2 <- ifelse(food$size>3&food$size<=5,1,0)
+
+food$town1 <- ifelse(food$town<3,1,0)
+
+food$woman <- ifelse(food$sex=="woman",1,0)
+
+food$resi2 <- mylm2$residuals
+food$resi3 <- mylm3$residuals
+```
+
+### Niveau-Niveau
+
+```{r}
+varfunc.ols2 <- lm(log(resi2^2)~log(totexp)+under25+under50+under75+size1+size2+
+                                      town1+woman,data = food)
+food$varfunc2 <- exp(varfunc.ols2$fitted.values)
+food.gls2 <- lm(wfood~totexp+under25+under50+under75+size1+size2+town1+woman,
+                weights = 1/sqrt(varfunc2), data = food)
+coeftest(mylm2, vcov = vcovHC(mylm2, "HC1"))
+coeftest(food.gls2, vcov = vcovHC(food.gls2, "HC1"))
+
+chisq <- bptest(mylm2)$statistic
+chisqbis <- bptest(food.gls2)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm2)$p.value
+pvalbis <- bptest(food.gls2)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 2")
+```
+
+La diminution de la variablité des coefficients estimés n'a pas lieu pour tous les coefficients après correction du modèle.
+
+```{r}
+varfunc.ols3 <- lm(log(resi3^2)~log(totexp)+log(totexp):under25+log(totexp):under50
+                   +log(totexp):under75+log(totexp):size1+log(totexp):size2+
+                     log(totexp):town1,data = food)
+food$varfunc3 <- exp(varfunc.ols3$fitted.values)
+food.gls3 <- lm(wfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                  totexp:size1+totexp:size2+totexp:town1,
+                weights = 1/sqrt(varfunc3), data = food)
+
+coeftest(mylm3, vcov = vcovHC(mylm3, "HC1"))
+coeftest(food.gls3, vcov = vcovHC(food.gls3, "HC1"))
+
+chisq <- bptest(mylm3)$statistic
+chisqbis <- bptest(food.gls3)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm3)$p.value
+pvalbis <- bptest(food.gls3)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 3")
+```
+
+La diminution de la variablité des coefficients estimés n'a pas lieu pour tous les coefficients après correction du modèle Niveau-Niveau.
+
+### Log-Niveau
+
+```{r}
+food$ltotexp <- log(food$totexp)
+food$lwfood <- log(food$wfood)
+food <- food %>% filter(!food$lwfood==-Inf) 
+```
+
+```{r}
+food$resi4 <- mylm4$residuals
+food$resi5 <- mylm5$residuals
+food$resi6 <- mylm6$residuals
+```
+
+
+```{r}
+varfunc.ols4 <- lm(log(resi4^2)~log(totexp)+log(totexp):under25+
+                     log(totexp):under50+log(totexp):under75+log(totexp):size1+
+                     log(totexp):size2+log(totexp):town1,data = food)
+food$varfunc4 <- exp(varfunc.ols4$fitted.values)
+food.gls4 <- lm(lwfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                  totexp:size1+totexp:size2+totexp:town1,
+                weights = 1/sqrt(varfunc4), data = food)
+
+coeftest(mylm4, vcov = vcovHC(mylm4, "HC1"))
+coeftest(food.gls4, vcov = vcovHC(food.gls4, "HC1"))
+
+chisq <- bptest(mylm4)$statistic
+chisqbis <- bptest(food.gls4)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm4)$p.value
+pvalbis <- bptest(food.gls4)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 4")
+```
+
+En passant la variable à expliquer *wfood* au log, on voit que la correction du modèle par la méthode des Moindres Carrés Pondérés permet une diminution des écarts-types estimés de tous les coefficients. La méthode des MCP semble réduire la variabilité des coefficients du modèle Log-Niveau.
+
+### Niveau-Log
+
+```{r}
+varfunc.ols5 <- lm(log(resi5^2)~ltotexp+ltotexp:under25+ltotexp:under50+
+                     ltotexp:under75+ltotexp:size1+ltotexp:size2+ltotexp:town1,
+                   data = food)
+food$varfunc5 <- exp(varfunc.ols5$fitted.values)
+food.gls5 <- lm(wfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                  ltotexp:size1+ltotexp:size2+ltotexp:town1,
+                weights = 1/sqrt(varfunc5), data = food)
+
+coeftest(mylm5, vcov = vcovHC(mylm5, "HC1"))
+coeftest(food.gls5, vcov = vcovHC(food.gls5, "HC1"))
+
+chisq <- bptest(mylm5)$statistic
+chisqbis <- bptest(food.gls5)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm5)$p.value
+pvalbis <- bptest(food.gls5)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 5")
+```
+
+En passant la variable explicative *totexp* au log, on voit que la correction du modèle par la méthode des Moindres Carrés Pondérés permet une diminution des écarts-types estimés de tous les coefficients. La méthode des MCP semble réduire la variabilité des coefficients du modèle Niveau-Log. Cette diminution est à nuancer car elle est très faible.
+
+
+### Log-Log
+
+```{r}
+varfunc.ols6 <- lm(log(resi6^2)~ltotexp+ltotexp:under25+ltotexp:under50+
+                     ltotexp:under75+ltotexp:size1+ltotexp:size2+ltotexp:town1,
+                   data = food)
+food$varfunc6 <- exp(varfunc.ols6$fitted.values)
+food.gls6 <- lm(lwfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                  ltotexp:size1+ltotexp:size2+ltotexp:town1, 
+                weights = 1/sqrt(varfunc6), data = food)
+
+coeftest(mylm6, vcov = vcovHC(mylm6, "HC1"))
+coeftest(food.gls6, vcov = vcovHC(food.gls6, "HC1"))
+
+chisq <- bptest(mylm6)$statistic
+chisqbis <- bptest(food.gls6)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm6)$p.value
+pvalbis <- bptest(food.gls6)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 6")
+```
+
+La diminution de la variablité des coefficients estimés n'a pas lieu pour tous les coefficients après correction du modèle Log-Log.
+
+
+**Conclusion**
+
+Dans un cas d'hétéroscédasticité, l'estimateur des MCO est certes non-biaisé, mais il n'est plus l'estimateur à la plus faible variance, d'où l'introduction des MCG.
+
+D'après le théorème de Gauss-Markov, l'estimateur des MCG est l'estimateur linéaire non-biaisé de variance minimale. En général, lorsque l'hypothèse d'homoscédasticité n'est pas vérifiée, on a tendance a mettre en logarithme la variable expliquée, la variable explicative ou bien les deux à la fois. Ceci crée un effet qui, combiné à la méthode des MCG, tend à corriger les erreurs dues à l'inégalité des variances.
+
+Néanmoins, il est important de nuancer le test de White. En effet, il est dit moins puissant que le test de Breusch-Pagan car il peut rejeter l'hypothèse nulle en raison d'une erreur de spécification telle que l'omission d'une variable au carré dans le modèle.
+
+En présence d'hétéroscédasticité, l'estimateur est
+$$\widehat{\beta_{MCG}} = (X'\Omega^{-1}X)^{-1}X'\Omega^{-1}Y$$
+et $$V(\widehat{\beta_{MCG}})= \sigma²(X'\Omega^{-1}X)$$
+où $$\widehat{\sigma^{2}}= ({\widehat{\mu'_{MCG}} \times \Omega^{-1} \times  \widehat{\mu_{MCG}}}) \times \frac{1}{N-k}$$
+avec $\widehat{\mu_{MCG}}=Y-X\widehat{\beta_{MCG}}$ le résidu des MCG.
+
+$\Omega$ est une matrice symétrique définie postive admettant une matrice inverse elle aussi symétrique définie positive. Ainsi, il existe une matrice T telle que $\Omega^{-1}=T'T$ avec $T$ la matrice de transformation du modèle $Y=X\beta+\mu^*$
+
+Ainsi, le modèle transformé par T est :
+$$TY=TX\beta+T\mu$$
+
+$$\Omega= \begin{pmatrix} \omega_1 & 0 & \ldots & 0 \\ 0 & \omega_2 & \ldots & 0 \\ \vdots & \vdots & \vdots & \vdots \\ 0 & 0 & \ldots & \omega_n \end{pmatrix}$$
+
+$$\Omega^{-1} = \begin{pmatrix} \frac{1}{\omega_1} & 0 & \ldots & 0 \\ 0 & \frac{1}{\omega_2} & \ldots & 0 \\ \vdots & \vdots & \vdots & \vdots \\ 0 & 0 & \ldots & \frac{1}{\omega_n} \end{pmatrix} \\ \Omega^{-1} = \begin{pmatrix} \frac{1}{\sqrt{(\omega_1})} & 0 & \ldots & 0 \\ 0 & \frac{1}{\sqrt{(\omega_2)}} & \ldots & 0 \\ \vdots & \vdots & \vdots & \vdots \\ 0 & 0 & \ldots & \frac{1}{\sqrt{(\omega_n)}} \end{pmatrix}$$
+
+Ainsi, nous obtenons la matrice $T$ suivante :
+$$T=\begin{pmatrix} \frac{1}{\sqrt{(\omega_1})} & 0 & \ldots & 0 \\ 0 & \frac{1}{\sqrt{(\omega_2)}} & \ldots & 0 \\ \vdots & \vdots & \vdots & \vdots \\ 0 & 0 & \ldots & \frac{1}{\sqrt{(\omega_n)}} \end{pmatrix}$$
+
+Cette opération de transformation est dite opération de sphéricisation.
+L'estimateur $\widehat{\beta_{MCG}}$ est dit efficace car sa variance $V(\widehat\beta_{MCG})= I^{-1}_{N}(\beta_0)$ où $I^{-1}_{N}(\beta_0)$ correspond à la borne de Cramer-Rao qui exprime une borne inférieure de la variance d'un estimateur sans biais.
+
+Si on utilise les MCO robustes, la variance de l'estimateur devient alors $V(\widehat\beta_{robuste})= \frac {\sum_{i=0}^n[(x_i-\bar{x})^{2} \widehat{e_i^{2}}]/N-K} {[\sum_{i=0}^n(x_n-\bar{x})^{2}]^{2}/N}$.
+
+Pour les modèles que nous avons estimés, la diminution des écarts-types estimés des coefficients estimés n'est pas significative pour les modèles Niveau-Niveau et Log-Log lorsque l'on corrige le modèle avec la méthode des Moindres Carrés Pondérés. De plus, la valeur de la statistique du test de Breusch-Pagan ne diminue pas après correction du modèle.
+C'est pourquoi nous referons les régressions sur un 100-échantillon de la base de données afin d'observer une éventuelle diminution de la variabilité des coefficients estimés après correction des modèles.
+
+
+## Visualizing results
+
+
+Dans les graphiques suivants, la droite rouge représente la droite estimée par la méthode des Moindres Carrés Ordinaires (MCO) et la droite verte est la droite estimée par la méthode des Moindres Carrés Pondérés (MCP). 
+
+
+```{r fig.width=13, fig.height=5.5}
+f1 <- ggplot(data = food, aes(y = wfood, x = totexp)) + geom_point(col = 'orange',
+                                                                   cex=0.05) +
+  geom_abline(slope = mylm2$coefficients[2], intercept = mylm2$coefficients[1],
+              col ='red') +
+  geom_abline(slope = food.gls2$coefficients[2], 
+              intercept = food.gls2$coefficients[1], 
+              col = 'green') +
+  labs(title = "Régression 2 (Niveau-Niveau) : MCO vs MCP")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10))
+
+f2 <- ggplot(data = food, aes(y = wfood, x = totexp)) + geom_point(col = 'orange',
+                                                                   cex=0.05) +
+  geom_abline(slope = mylm3$coefficients[2], intercept = mylm3$coefficients[1],
+              col ='red') +
+  geom_abline(slope = food.gls3$coefficients[2],
+              intercept = food.gls3$coefficients[1], 
+              col = 'green')+
+  labs(title = "Régression 3 (Niveau-Niveau) : MCO vs MCP")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10))
+
+ggarrange(f1,f2)
+```
+
+```{r fig.width=12, fig.height=9}
+f3 <- ggplot(data = food, aes(y = lwfood, x = totexp)) + geom_point(col = 'orange',
+                                                                    cex=0.05) +
+  geom_abline(slope = mylm4$coefficients[2], intercept = mylm4$coefficients[1],
+              col ='red') +
+  geom_abline(slope = food.gls4$coefficients[2],
+              intercept = food.gls4$coefficients[1], 
+              col = 'green')+
+  labs(title = "Régression 4 (Log-Niveau) : MCO vs MCP")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10))
+
+f4 <- ggplot(data = food, aes(y = wfood, x = ltotexp)) + geom_point(col = 'orange',
+                                                                    cex=0.05) +
+  geom_abline(slope = mylm5$coefficients[2], intercept = mylm5$coefficients[1],
+              col = 'red') +
+  geom_abline(slope = food.gls5$coefficients[2], 
+              intercept = food.gls5$coefficients[1], 
+              col = 'green')+
+  labs(title = "Régression 5 (Niveau-Log) : MCO vs MCP")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10))
+
+f5 <- ggplot(data = food, aes(y = lwfood, x = ltotexp)) + geom_point(col = 'orange', cex=0.05) +
+  geom_abline(slope = mylm6$coefficients[2], intercept = mylm6$coefficients[1],
+              col = 'red') +
+  geom_abline(slope = food.gls6$coefficients[2],
+              intercept = food.gls6$coefficients[1], 
+              col = 'green')+
+  labs(title = "Régression 6 (Log-Log) : MCO vs MCP")+
+  theme(plot.title = element_text(size = 12, face = "bold")) +
+  theme(axis.title.x = element_text(size = 10)) +
+  theme(axis.title.y = element_text(size = 10))
+
+ggarrange(f3,f4,f5)
+```
+
+Il apparaît que l'utilisation de formes fonctionnelles (en l'ocurrence logartihmiques) semble réduire l'écart entre les 2 droites de régression. 
+En effet, la droite estimée obtenue avec la méthode des MCO est plus colinéaire avec la droite estimée par MCP lorsque le modèle estimé comprend une forme logarithmique. L'adéquation la plus nette entre les deux droites se produit pour le modèle Log-Log qui correspond à la régression 6. 
+
+
+## Etude d'un sous-échantillon de **food**
+
+
+```{r}
+food <- read.csv(file='BudgetFood.csv',header=TRUE,sep=",",dec=".")
+food <- food[-14015,]
+
+food$under25 <- ifelse(food$age<25,1,0)
+food$under50 <- ifelse(food$age>=25&food$age<50,1,0)
+food$under75 <- ifelse(food$age>=50&food$age<75,1,0)
+
+food$size1 <- ifelse(food$size<4,1,0)
+food$size2 <- ifelse(food$size>3&food$size<=5,1,0)
+
+food$town1 <- ifelse(food$town<3,1,0)
+
+food$woman <- ifelse(food$sex=="woman",1,0)
+
+food$ltotexp <- log(food$totexp)
+food$lwfood <- log(food$wfood)
+food <- food %>% filter(!food$lwfood==-Inf) 
+```
+
+
+On extrait un sous-échantillon aléatoire de 100 observations de la base de données **food**. On choisit les 100 premières observations afin d'éviter des changements dans les résultats lors de la compilation.
+L'objectif est d'étudier une éventuelle diminution des écarts-types estimés des coefficients estimés entre les modèles estimés par MCO et les modèles corrigés estimés par MCP. Il semble probable qu'en utlisant la méthode des MCP, il y ait moins de variabilité sur les coefficients des différents modèles. On suppose que les résultats seront plus significatifs sur un 100-échantillon que sur toute la base de données.
+
+Pour chaque modèle, les résultats du premier test de Wald correspondent à la régression utilisant la méthode des MCO et et les résultats du second test de Wald correspondent à la régression utilisant la méthode des MCP. Nous utiliserons ces tests afin d'étudier l'évolution des écarts-types estimés après correction du modèle.
+
+On effectura aussi un test de Breusch-Pagan pour détecter toute forme éventuelle d'hétéroscédasticité des résidus. On rappelle les hypothèses du test ici :
+$$\left \{
+\begin{array}{rcl}
+H_0:V(\epsilon_i)=\sigma^2 \\
+H_1 :V(\epsilon_i)=\sigma_i^2
+\end{array}
+\right.$$
+
+```{r}
+sample <- food[c(1:100),] 
+```
+
+On refait les régressions que l'on a établies sur toute la base de données. 
+On commence par la régression 3 Niveau-Niveau.
+$$wfood_i = \beta_0 + \beta_1totexp_i + \beta_2totexp_i\times under25+\beta_3totexp_i\times under50+\\ \beta_4totexp_i\times size1 + \beta_5totexp_i\times size2 + \beta_6totexp_i\times town1+\varepsilon_i, \ \forall i$$
+
+```{r}
+mylm3bis<- lm(wfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                totexp:size1+totexp:size2+totexp:town1, data=sample)
+sample$resi3bis <- mylm3bis$residuals
+```
+
+
+```{r}
+varfunc.ols3bis <- lm(log(resi3bis^2)~totexp+totexp:under25+totexp:under50+
+                        totexp:under75+totexp:size1+totexp:size2+totexp:town1,
+                      data=sample)
+sample$varfunc3bis <- exp(varfunc.ols3bis$fitted.values)
+sample.gls3bis <- lm(wfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                       totexp:size1+totexp:size2+totexp:town1, 
+                     weights = 1/sqrt(varfunc3bis), data = sample)
+
+coeftest(mylm3bis, vcov = vcovHC(mylm3bis, "HC1"))
+coeftest(sample.gls3bis,vcov = vcovHC(sample.gls3bis, "HC1"))
+
+chisq <- bptest(mylm3bis)$statistic
+chisqbis <- bptest(sample.gls3bis)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm3bis)$p.value
+pvalbis <- bptest(sample.gls3bis)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 3")
+```
+On voit que la  statistique du test de Breusch-Pagan est inférieure à la valeur critique $\chi^{2,\ 7}_{0.95} \approx 14.07$. Ainsi, on peut accepter l'hypothèse nulle d'homoscédasticité au risque $\alpha=5\%$.
+Aussi, la méthode des MCP semble permettre une diminution de la variabilité des coefficients estimés.
+
+On procède désormais à la régression Log-Niveau suivante sur notre nouveau jeu de données réduit :
+$$ln(wfood_{i}) = \beta_{0} + \beta_{1}totexp_{i} + \beta_{2}totexp_{i}\times under25+\beta_{3}totexp_{i}\times under50+\\ \beta_{4}totexp_{i}\times under75 \beta_{5}totexp_{i}\times size1 + \beta_{6}totexp_{i}\times size2 + \beta_{7}totexp_{i}\times town1+\varepsilon_{i}, \ \forall i$$
+
+```{r}
+mylm4bis <- lm(lwfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                 totexp:size1+totexp:size2+totexp:town1, data=sample)
+sample$resi4bis <- mylm4bis$residuals
+```
+
+
+```{r}
+varfunc.ols4bis <- lm(log(resi4bis^2)~totexp+totexp:under25+totexp:under50+
+                        totexp:under75+totexp:size1+totexp:size2+totexp:town1,
+                      data=sample)
+sample$varfunc4bis <- exp(varfunc.ols4bis$fitted.values)
+sample.gls4bis <- lm(lwfood~totexp+totexp:under25+totexp:under50+totexp:under75+
+                       totexp:size1+totexp:size2+totexp:town1, 
+                     weights = 1/sqrt(varfunc4bis), data = sample)
+
+coeftest(mylm4bis, vcov = vcovHC(mylm4bis, "HC1"))
+coeftest(sample.gls4bis,vcov = vcovHC(sample.gls4bis, "HC1"))
+
+chisq <- bptest(mylm4bis)$statistic
+chisqbis <- bptest(sample.gls4bis)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm4bis)$p.value
+pvalbis <- bptest(sample.gls4bis)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 4")
+```
+
+Ici, on a $BP^* < \chi^{2,\ 7}_{0.95} \approx 14.07$. De fait, on accepte l'hypothèse d'homoscédasticité des résidus du modèle. La statistique du test de Breusch-Pagan est inférieure pour ce modèle Log-Niveau que pour le modèle Niveau-Niveau. On a donc une diminution de la variance des résidus en passant *wfood* au log.
+
+Pour ce modèle Log-Niveau, la méthode des MCP semble permettre une diminution de la variabilité des coefficients estimés, à l'exception de $\beta_7$. 
+
+Passons ensuite à la régression Niveau-Log suivante : 
+$$wfood_{i} = \beta_0 + \beta_1ln(totexp_i) + \beta_2ln(totexp_i)\times under25+\beta_{3}ln(totexp_i)\times under50 + \\ \beta_4ln(totexp_i)\times under75  +\beta_5ln(totexp_i)\times size1 + \beta_6ln(totexp_i)\times size2 + \beta_7ln(totexp_i)\times town1+\varepsilon_i, \ \forall i$$
+
+
+```{r}
+mylm5bis<- lm(wfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                ltotexp:size1+ltotexp:size2+ltotexp:town1,data=sample)
+sample$resi5bis <- mylm5bis$residuals
+```
+
+
+
+```{r}
+varfunc.ols5bis <- lm(log(resi5bis^2)~ltotexp+ltotexp:under25+ltotexp:under50+
+                        ltotexp:under75+ltotexp:size1+ltotexp:size2+ltotexp:town1,
+                  data=sample)
+sample$varfunc5bis <- exp(varfunc.ols5bis$fitted.values)
+sample.gls5bis <- lm(wfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+                       ltotexp:size1+ltotexp:size2+ltotexp:town1, 
+                     weights = 1/sqrt(varfunc5bis), data = sample)
+
+coeftest(mylm5bis, vcov = vcovHC(mylm5bis, "HC1"))
+coeftest(sample.gls5bis,vcov = vcovHC(sample.gls5bis, "HC1"))
+
+chisq <- bptest(mylm5bis)$statistic
+chisqbis <- bptest(sample.gls5bis)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm5bis)$p.value
+pvalbis <- bptest(sample.gls5bis)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 5")
+```
+
+
+On a $BP^* < \chi^{2,\ 7}_{0.95}$. On peut donc accepter l'hypothèse nulle d'homoscédasticité au risque 5%. 
+De plus, l'utilisation des MCP permet une légère diminution des écarts-types estimés des coefficients.
+
+Enfin, on applique la régréssion Log-Log à notre 100-échantillon:
+$$ln(wfood_{i}) = \beta_{0} + \beta_{1}ln(totexp_{i}) + \beta_{2}ln(totexp_{i})\times under25+\beta_{3}ln(totexp_{i})\times under50 +\\ \beta_{4}ln(totexp_{i})\times under75 +\beta_{5}ln(totexp_{i})\times size1 + \beta_{6}ln(totexp_{i})\times size2 + \beta_{7}ln(totexp_{i})\times town1+\varepsilon_{i}, \ \forall i$$
+
+```{r}
+mylm6bis<-lm(lwfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75+
+              ltotexp:size1+ltotexp:size2+ltotexp:town1, data=sample)
+sample$resi6bis <- mylm6bis$residuals
+```
+
+```{r}
+varfunc.ols6bis <- lm(log(resi6bis^2)~ltotexp+ltotexp:under25+ltotexp:under50+
+                        ltotexp:under75+ltotexp:size1+ltotexp:size2+ltotexp:town1,
+                  data=sample)
+sample$varfunc6bis <- exp(varfunc.ols6bis$fitted.values)
+sample.gls6bis <- lm(lwfood~ltotexp+ltotexp:under25+ltotexp:under50+ltotexp:under75
+                     +ltotexp:size1+ltotexp:size2+ltotexp:town1, 
+                     weights = 1/sqrt(varfunc6bis), data = sample)
+
+coeftest(mylm6bis, vcov = vcovHC(mylm6bis, "HC1"))
+coeftest(sample.gls6bis,vcov = vcovHC(sample.gls6bis, "HC1"))
+
+chisq <- bptest(mylm6bis)$statistic
+chisqbis <- bptest(sample.gls6bis)$statistic
+qc <- qchisq(0.95, df=7)
+pval <- bptest(mylm6bis)$p.value
+pvalbis <- bptest(sample.gls6bis)$p.value
+
+tab <- as.table(matrix(c(chisq, chisqbis, qc, qc, pval, pvalbis), nrow=2, ncol=3))
+colnames(tab) <- c("Statistique", "Valeur critique", "p-value")
+rownames(tab) <- c("MCO", "MCP")
+tab %>% kable_1(titre=
+                  "Résultats du test de Breusch-Pagan associé à la régression 6")
+```
+
+On relève une diminution plus marquées des écarts-types estimés d'une grande partie des coefficients lorsque l'on estime le modèle par MCP.
+On relève aussi plus de coefficients significatifs pour le modèle estimé par MCP. 
+Pour le test de Breusch-Pagan, la *p-value* n'est pas significative. On ne peut pas rejeter l'hypothèse d'homoscédasticité des résidus. 
+
+**Conclusion**
+
+Certes la méthode des Moindres Carrés Pondérés ne permet pas de faire diminuer la valeur observée de la statistique du test de Breusch-Pagan. Toutefois, on a pu constater que pour chaque modèle (à l'exception du modèle Niveau-Log), la méthode des MCP permet une diminution d'une partie ou de la totalité des écarts-types des coefficients estimés. 
+
+Estimer un modèle par MCP semble donc efficace pour minimiser la variabilité des coefficients estimés. Aussi pour les modèles Niveau-Log et Log-Log, plus de coefficients sont significatifs lorsque l'on estime le modèle par MCP. 
+
+Notons cependant que la mise au logarithme de la variable explicative *totexp* tout en gardant la variable dépendante en niveau semble moins efficace pour réduire la variance des résidus.
+
+Ainsi, sur notre 100-échantillon, les résultats des tests (Fisher, Student,...) seront plus pertinents pour les régressions faites par MCP plutôt que pour celles faites par MCO. 
+
